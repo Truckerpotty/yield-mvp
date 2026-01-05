@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 type Location = {
@@ -13,7 +14,7 @@ type TrackedItem = {
   name: string;
   unit: string;
 
-  value_per_unit: number; // cost per input unit
+  value_per_unit: number;
   baseline_input: number | null;
   baseline_output: number | null;
   tolerance_green: number;
@@ -90,6 +91,10 @@ function classify(
 }
 
 export default function LocationPage({ params }: { params: { id: string } }) {
+  const searchParams = useSearchParams();
+  const mode = (searchParams.get("mode") ?? "admin").toLowerCase();
+  const isEmployee = mode === "employee";
+
   const [location, setLocation] = useState<Location | null>(null);
   const [items, setItems] = useState<TrackedItem[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -112,11 +117,19 @@ export default function LocationPage({ params }: { params: { id: string } }) {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const [entryPeriodLabelByItem, setEntryPeriodLabelByItem] = useState<Record<string, string>>({});
-  const [entryStartByItem, setEntryStartByItem] = useState<Record<string, string>>({});
+  const [entryPeriodLabelByItem, setEntryPeriodLabelByItem] = useState<
+    Record<string, string>
+  >({});
+  const [entryStartByItem, setEntryStartByItem] = useState<Record<string, string>>(
+    {}
+  );
   const [entryEndByItem, setEntryEndByItem] = useState<Record<string, string>>({});
-  const [entryInputByItem, setEntryInputByItem] = useState<Record<string, string>>({});
-  const [entryOutputByItem, setEntryOutputByItem] = useState<Record<string, string>>({});
+  const [entryInputByItem, setEntryInputByItem] = useState<Record<string, string>>(
+    {}
+  );
+  const [entryOutputByItem, setEntryOutputByItem] = useState<
+    Record<string, string>
+  >({});
   const [addingEntryId, setAddingEntryId] = useState<string | null>(null);
 
   const entriesByItem = useMemo(() => {
@@ -152,6 +165,13 @@ export default function LocationPage({ params }: { params: { id: string } }) {
     const safeItems = (itemsData ?? []) as TrackedItem[];
     setItems(safeItems);
 
+    if (isEmployee) {
+      setEntries([]);
+      setLocation(locationData ?? null);
+      setLoading(false);
+      return;
+    }
+
     if (safeItems.length > 0) {
       const ids = safeItems.map((x) => x.id);
       const { data: entriesData } = await supabase
@@ -171,7 +191,7 @@ export default function LocationPage({ params }: { params: { id: string } }) {
 
   useEffect(() => {
     fetchData();
-  }, [params.id]);
+  }, [params.id, isEmployee]);
 
   const addItem = async () => {
     const name = newItemName.trim();
@@ -205,7 +225,9 @@ export default function LocationPage({ params }: { params: { id: string } }) {
     setEditingValue(String(item.value_per_unit));
 
     setBaselineInput(item.baseline_input == null ? "" : String(item.baseline_input));
-    setBaselineOutput(item.baseline_output == null ? "" : String(item.baseline_output));
+    setBaselineOutput(
+      item.baseline_output == null ? "" : String(item.baseline_output)
+    );
     setTolGreen(String(item.tolerance_green ?? 0.03));
     setTolYellow(String(item.tolerance_yellow ?? 0.06));
   };
@@ -347,7 +369,9 @@ export default function LocationPage({ params }: { params: { id: string } }) {
     setEntryStartByItem((p) => ({ ...p, [item.id]: "" }));
     setEntryEndByItem((p) => ({ ...p, [item.id]: "" }));
 
-    fetchData();
+    if (!isEmployee) {
+      fetchData();
+    }
   };
 
   return (
@@ -358,34 +382,41 @@ export default function LocationPage({ params }: { params: { id: string } }) {
 
       {!loading && location && (
         <>
-          <h1 className="text-2xl font-bold mb-6">{location.name}</h1>
+          <div className="flex items-center justify-between mb-6">
+            <h1 className="text-2xl font-bold">{location.name}</h1>
+            <div className="text-sm opacity-70">
+              Mode: {isEmployee ? "Employee" : "Admin"}
+            </div>
+          </div>
 
           <h2 className="text-xl font-semibold mb-2">Tracked Items</h2>
 
-          <div className="grid grid-cols-4 gap-2 mb-4">
-            <input
-              className="border px-2 py-1 text-black bg-white"
-              placeholder="Name"
-              value={newItemName}
-              onChange={(e) => setNewItemName(e.target.value)}
-            />
-            <input
-              className="border px-2 py-1 text-black bg-white"
-              placeholder="Unit"
-              value={newUnit}
-              onChange={(e) => setNewUnit(e.target.value)}
-            />
-            <input
-              className="border px-2 py-1 text-black bg-white"
-              placeholder="Cost per input unit"
-              type="number"
-              value={newValue}
-              onChange={(e) => setNewValue(e.target.value)}
-            />
-            <button onClick={addItem} className="bg-black text-white px-3 py-1">
-              Add
-            </button>
-          </div>
+          {!isEmployee && (
+            <div className="grid grid-cols-4 gap-2 mb-4">
+              <input
+                className="border px-2 py-1 text-black bg-white"
+                placeholder="Name"
+                value={newItemName}
+                onChange={(e) => setNewItemName(e.target.value)}
+              />
+              <input
+                className="border px-2 py-1 text-black bg-white"
+                placeholder="Unit"
+                value={newUnit}
+                onChange={(e) => setNewUnit(e.target.value)}
+              />
+              <input
+                className="border px-2 py-1 text-black bg-white"
+                placeholder="Cost per input unit"
+                type="number"
+                value={newValue}
+                onChange={(e) => setNewValue(e.target.value)}
+              />
+              <button onClick={addItem} className="bg-black text-white px-3 py-1">
+                Add
+              </button>
+            </div>
+          )}
 
           {items.length === 0 && <p>No tracked items yet</p>}
 
@@ -409,37 +440,51 @@ export default function LocationPage({ params }: { params: { id: string } }) {
                         <div className="font-semibold">
                           {item.name} ({item.unit})
                         </div>
-                        <div className="text-sm opacity-70">
-                          Cost per input unit: ${item.value_per_unit}
-                        </div>
-                        <div className="text-sm opacity-70">
-                          Baseline:{" "}
-                          {item.baseline_input != null && item.baseline_output != null
-                            ? `${item.baseline_input} input → ${item.baseline_output} output`
-                            : "Not set"}
-                          {item.baseline_locked ? " (locked)" : ""}
-                        </div>
+
+                        {!isEmployee && (
+                          <>
+                            <div className="text-sm opacity-70">
+                              Cost per input unit: ${item.value_per_unit}
+                            </div>
+                            <div className="text-sm opacity-70">
+                              Baseline:{" "}
+                              {item.baseline_input != null &&
+                              item.baseline_output != null
+                                ? `${item.baseline_input} input → ${item.baseline_output} output`
+                                : "Not set"}
+                              {item.baseline_locked ? " (locked)" : ""}
+                            </div>
+                          </>
+                        )}
+
+                        {isEmployee && (
+                          <div className="text-sm opacity-70">
+                            Enter today values only. No history is shown.
+                          </div>
+                        )}
                       </div>
 
-                      <div className="flex gap-2">
-                        <button
-                          className="border rounded px-3 py-1"
-                          onClick={() => startEdit(item)}
-                        >
-                          Edit
-                        </button>
-                        <button
-                          className="border rounded px-3 py-1"
-                          onClick={() => deleteItem(item.id)}
-                          disabled={isDeleting}
-                        >
-                          {isDeleting ? "Deleting..." : "Delete"}
-                        </button>
-                      </div>
+                      {!isEmployee && (
+                        <div className="flex gap-2">
+                          <button
+                            className="border rounded px-3 py-1"
+                            onClick={() => startEdit(item)}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            className="border rounded px-3 py-1"
+                            onClick={() => deleteItem(item.id)}
+                            disabled={isDeleting}
+                          >
+                            {isDeleting ? "Deleting..." : "Delete"}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
 
-                  {isEditing && (
+                  {!isEmployee && isEditing && (
                     <div className="space-y-3">
                       <div className="grid grid-cols-3 gap-2">
                         <input
@@ -470,7 +515,9 @@ export default function LocationPage({ params }: { params: { id: string } }) {
                           value={baselineInput}
                           onChange={(e) => setBaselineInput(e.target.value)}
                           placeholder="Baseline input"
-                          disabled={items.find((x) => x.id === editingId)?.baseline_locked}
+                          disabled={
+                            items.find((x) => x.id === editingId)?.baseline_locked
+                          }
                         />
                         <input
                           className="border px-2 py-1 text-black bg-white"
@@ -478,7 +525,9 @@ export default function LocationPage({ params }: { params: { id: string } }) {
                           value={baselineOutput}
                           onChange={(e) => setBaselineOutput(e.target.value)}
                           placeholder="Baseline output"
-                          disabled={items.find((x) => x.id === editingId)?.baseline_locked}
+                          disabled={
+                            items.find((x) => x.id === editingId)?.baseline_locked
+                          }
                         />
                         <input
                           className="border px-2 py-1 text-black bg-white"
@@ -532,117 +581,189 @@ export default function LocationPage({ params }: { params: { id: string } }) {
                       </div>
 
                       <div className="text-sm opacity-70">
-                        Baseline lock prevents editing baseline numbers (MVP behavior).
+                        Baseline lock prevents editing baseline numbers.
                       </div>
                     </div>
                   )}
 
                   {!isEditing && (
                     <div className="mt-4 border-t pt-4">
-                      <div className="font-semibold mb-2">Entries</div>
+                      <div className="font-semibold mb-2">
+                        {isEmployee ? "Enter today numbers" : "Entries"}
+                      </div>
 
-                      {!hasBaseline && (
-                        <div className="text-sm opacity-70">
-                          Set baseline input and baseline output to enable expected output and variance.
+                      {isEmployee && (
+                        <div className="text-sm opacity-70 mb-3">
+                          Managers review results. Employees only enter numbers.
                         </div>
                       )}
 
-                      <div className="grid grid-cols-5 gap-2 mb-2">
-                        <input
-                          className="border px-2 py-1 text-black bg-white"
-                          placeholder="Period label (optional)"
-                          value={entryPeriodLabelByItem[item.id] ?? ""}
-                          onChange={(e) =>
-                            setEntryPeriodLabelByItem((p) => ({ ...p, [item.id]: e.target.value }))
-                          }
-                        />
-                        <input
-                          className="border px-2 py-1 text-black bg-white"
-                          type="date"
-                          value={entryStartByItem[item.id] ?? ""}
-                          onChange={(e) =>
-                            setEntryStartByItem((p) => ({ ...p, [item.id]: e.target.value }))
-                          }
-                        />
-                        <input
-                          className="border px-2 py-1 text-black bg-white"
-                          type="date"
-                          value={entryEndByItem[item.id] ?? ""}
-                          onChange={(e) =>
-                            setEntryEndByItem((p) => ({ ...p, [item.id]: e.target.value }))
-                          }
-                        />
-                        <input
-                          className="border px-2 py-1 text-black bg-white"
-                          placeholder="Input used"
-                          type="number"
-                          value={entryInputByItem[item.id] ?? ""}
-                          onChange={(e) =>
-                            setEntryInputByItem((p) => ({ ...p, [item.id]: e.target.value }))
-                          }
-                        />
-                        <input
-                          className="border px-2 py-1 text-black bg-white"
-                          placeholder="Output produced"
-                          type="number"
-                          value={entryOutputByItem[item.id] ?? ""}
-                          onChange={(e) =>
-                            setEntryOutputByItem((p) => ({ ...p, [item.id]: e.target.value }))
-                          }
-                        />
-                      </div>
+                      {!isEmployee && !hasBaseline && (
+                        <div className="text-sm opacity-70">
+                          Set baseline input and baseline output to enable expected output and
+                          variance.
+                        </div>
+                      )}
 
-                      <button
-                        className="bg-black text-white px-3 py-1 rounded"
-                        onClick={() => addEntry(item)}
-                        disabled={addingEntryId === item.id}
-                      >
-                        {addingEntryId === item.id ? "Adding..." : "Add entry"}
-                      </button>
+                      {isEmployee ? (
+                        <>
+                          <div className="grid grid-cols-3 gap-2 mb-2">
+                            <input
+                              className="border px-2 py-1 text-black bg-white"
+                              placeholder="Shift or note (optional)"
+                              value={entryPeriodLabelByItem[item.id] ?? ""}
+                              onChange={(e) =>
+                                setEntryPeriodLabelByItem((p) => ({
+                                  ...p,
+                                  [item.id]: e.target.value,
+                                }))
+                              }
+                            />
+                            <input
+                              className="border px-2 py-1 text-black bg-white"
+                              placeholder={`Input used (${item.unit})`}
+                              type="number"
+                              value={entryInputByItem[item.id] ?? ""}
+                              onChange={(e) =>
+                                setEntryInputByItem((p) => ({
+                                  ...p,
+                                  [item.id]: e.target.value,
+                                }))
+                              }
+                            />
+                            <input
+                              className="border px-2 py-1 text-black bg-white"
+                              placeholder="Output produced"
+                              type="number"
+                              value={entryOutputByItem[item.id] ?? ""}
+                              onChange={(e) =>
+                                setEntryOutputByItem((p) => ({
+                                  ...p,
+                                  [item.id]: e.target.value,
+                                }))
+                              }
+                            />
+                          </div>
 
-                      <div className="mt-3 space-y-2">
-                        {(entriesByItem[item.id] ?? []).length === 0 && (
-                          <div className="text-sm opacity-70">No entries yet</div>
-                        )}
+                          <button
+                            className="bg-black text-white px-3 py-1 rounded"
+                            onClick={() => addEntry(item)}
+                            disabled={addingEntryId === item.id}
+                          >
+                            {addingEntryId === item.id ? "Saving..." : "Submit"}
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <div className="grid grid-cols-5 gap-2 mb-2">
+                            <input
+                              className="border px-2 py-1 text-black bg-white"
+                              placeholder="Period label (optional)"
+                              value={entryPeriodLabelByItem[item.id] ?? ""}
+                              onChange={(e) =>
+                                setEntryPeriodLabelByItem((p) => ({
+                                  ...p,
+                                  [item.id]: e.target.value,
+                                }))
+                              }
+                            />
+                            <input
+                              className="border px-2 py-1 text-black bg-white"
+                              type="date"
+                              value={entryStartByItem[item.id] ?? ""}
+                              onChange={(e) =>
+                                setEntryStartByItem((p) => ({
+                                  ...p,
+                                  [item.id]: e.target.value,
+                                }))
+                              }
+                            />
+                            <input
+                              className="border px-2 py-1 text-black bg-white"
+                              type="date"
+                              value={entryEndByItem[item.id] ?? ""}
+                              onChange={(e) =>
+                                setEntryEndByItem((p) => ({
+                                  ...p,
+                                  [item.id]: e.target.value,
+                                }))
+                              }
+                            />
+                            <input
+                              className="border px-2 py-1 text-black bg-white"
+                              placeholder="Input used"
+                              type="number"
+                              value={entryInputByItem[item.id] ?? ""}
+                              onChange={(e) =>
+                                setEntryInputByItem((p) => ({
+                                  ...p,
+                                  [item.id]: e.target.value,
+                                }))
+                              }
+                            />
+                            <input
+                              className="border px-2 py-1 text-black bg-white"
+                              placeholder="Output produced"
+                              type="number"
+                              value={entryOutputByItem[item.id] ?? ""}
+                              onChange={(e) =>
+                                setEntryOutputByItem((p) => ({
+                                  ...p,
+                                  [item.id]: e.target.value,
+                                }))
+                              }
+                            />
+                          </div>
 
-                        {(entriesByItem[item.id] ?? []).slice(0, 5).map((e) => {
-                          const expected = computeExpectedOutput(item, e.input_used);
-                          const status =
-                            expected == null ? null : classify(item, expected, e.output_count);
-                          const cost =
-                            expected == null ? null : computeWasteCost(item, expected, e.output_count);
+                          <button
+                            className="bg-black text-white px-3 py-1 rounded"
+                            onClick={() => addEntry(item)}
+                            disabled={addingEntryId === item.id}
+                          >
+                            {addingEntryId === item.id ? "Adding..." : "Add entry"}
+                          </button>
 
-                          const stateText =
-                            status == null ? "Baseline needed" : status.label;
+                          <div className="mt-3 space-y-2">
+                            {(entriesByItem[item.id] ?? []).length === 0 && (
+                              <div className="text-sm opacity-70">No entries yet</div>
+                            )}
 
-                          return (
-                            <div key={e.id} className="border rounded px-3 py-2">
-                              <div className="text-sm opacity-80">
-                                {e.period_label ? e.period_label : "Entry"}{" "}
-                                {e.period_start || e.period_end
-                                  ? `(${e.period_start ?? "?"} to ${e.period_end ?? "?"})`
-                                  : ""}
-                              </div>
+                            {(entriesByItem[item.id] ?? []).slice(0, 5).map((e) => {
+                              const expected = computeExpectedOutput(item, e.input_used);
+                              const status =
+                                expected == null ? null : classify(item, expected, e.output_count);
+                              const cost =
+                                expected == null
+                                  ? null
+                                  : computeWasteCost(item, expected, e.output_count);
 
-                              <div className="text-sm">
-                                Input used: {e.input_used}{" "}
-                                {item.unit}{" "}
-                                Output: {e.output_count}
-                              </div>
+                              const stateText = status == null ? "Baseline needed" : status.label;
 
-                              <div className="text-sm">
-                                Expected:{" "}
-                                {expected == null ? "Unknown" : expected.toFixed(2)}
-                                {" "}
-                                Status: {stateText}
-                                {" "}
-                                Impact:{" "}
-                                {cost == null ? "Unknown" : `$${cost.toFixed(2)}`}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
+                              return (
+                                <div key={e.id} className="border rounded px-3 py-2">
+                                  <div className="text-sm opacity-80">
+                                    {e.period_label ? e.period_label : "Entry"}{" "}
+                                    {e.period_start || e.period_end
+                                      ? `(${e.period_start ?? "?"} to ${e.period_end ?? "?"})`
+                                      : ""}
+                                  </div>
+
+                                  <div className="text-sm">
+                                    Input used: {e.input_used} {item.unit} Output: {e.output_count}
+                                  </div>
+
+                                  <div className="text-sm">
+                                    Expected:{" "}
+                                    {expected == null ? "Unknown" : expected.toFixed(2)} Status:{" "}
+                                    {stateText} Impact:{" "}
+                                    {cost == null ? "Unknown" : `$${cost.toFixed(2)}`}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
                 </li>
@@ -654,3 +775,4 @@ export default function LocationPage({ params }: { params: { id: string } }) {
     </main>
   );
 }
+
