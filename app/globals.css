@@ -25,3 +25,14 @@ body {
     )
     rgb(var(--background-start-rgb));
 }
+    input, textarea, select {
+  background-color: #ffffff;
+  color: #000000;
+  border: 1px solid #999;
+}
+button {
+  background-color: #e5e7eb;
+  color: #000000;
+  border: 1px solid #999;
+}
+

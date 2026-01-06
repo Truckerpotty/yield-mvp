@@ -28,6 +28,7 @@ export async function POST(req: Request) {
     if (!token) return NextResponse.json({ error: "Missing bearer token" }, { status: 401 });
 
     const admin = createClient(url, service, { auth: { persistSession: false } });
+
     const authed = await admin.auth.getUser(token);
     const requester = authed.data.user;
     if (!requester) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
@@ -40,8 +41,9 @@ export async function POST(req: Request) {
     const region_id = body.region_id ? String(body.region_id) : null;
 
     if (!email) return NextResponse.json({ error: "Email required" }, { status: 400 });
-    if (!password || password.length < 8)
+    if (!password || password.length < 8) {
       return NextResponse.json({ error: "Password required, 8 chars minimum" }, { status: 400 });
+    }
     if (!isValidRole(role)) return NextResponse.json({ error: "Invalid role" }, { status: 400 });
 
     if (role === "master_admin") {
@@ -61,26 +63,33 @@ export async function POST(req: Request) {
     if (!me) return NextResponse.json({ error: "No profile for requester" }, { status: 403 });
 
     const myRole = String(me.role || "") as Role;
+
     const isAdmin =
       myRole === "local_admin" || myRole === "regional_admin" || myRole === "master_admin";
     if (!isAdmin) return NextResponse.json({ error: "Access denied" }, { status: 403 });
 
     if (myRole === "local_admin") {
-      if (role !== "employee")
+      if (role !== "employee") {
         return NextResponse.json({ error: "Local admin can only create employees" }, { status: 403 });
-      if (!me.location_id)
+      }
+      if (!me.location_id) {
         return NextResponse.json({ error: "Requester missing location_id" }, { status: 400 });
-      if (!location_id || location_id !== me.location_id)
+      }
+      if (!location_id || location_id !== me.location_id) {
         return NextResponse.json({ error: "Local admin must assign their own location" }, { status: 403 });
+      }
     }
 
     if (myRole === "regional_admin") {
-      if (role === "regional_admin")
+      if (role === "regional_admin") {
         return NextResponse.json({ error: "Regional admin cannot create regional admins" }, { status: 403 });
-      if (!me.region_id)
+      }
+      if (!me.region_id) {
         return NextResponse.json({ error: "Requester missing region_id" }, { status: 400 });
-      if (!location_id)
+      }
+      if (!location_id) {
         return NextResponse.json({ error: "Location required for this role" }, { status: 400 });
+      }
 
       const { data: loc, error: locErr } = await admin
         .from("locations")
@@ -98,15 +107,17 @@ export async function POST(req: Request) {
 
     if (myRole === "master_admin") {
       if (role === "employee" || role === "local_admin") {
-        if (!location_id)
+        if (!location_id) {
           return NextResponse.json(
             { error: "Location required for employee or local admin" },
             { status: 400 }
           );
+        }
       }
       if (role === "regional_admin") {
-        if (!region_id)
+        if (!region_id) {
           return NextResponse.json({ error: "Region required for regional admin" }, { status: 400 });
+        }
       }
     }
 
@@ -129,6 +140,7 @@ export async function POST(req: Request) {
         .select("region_id")
         .eq("id", location_id)
         .maybeSingle();
+
       finalRegionId = loc?.region_id ? String(loc.region_id) : null;
     }
 
@@ -138,3 +150,14 @@ export async function POST(req: Request) {
         {
           id: newUser.id,
           role,
+          location_id: location_id || null,
+          region_id: finalRegionId || null,
+        },
+        { onConflict: "id" }
+      );
+
+    return NextResponse.json({ ok: true, id: newUser.id });
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
+  }
+}
