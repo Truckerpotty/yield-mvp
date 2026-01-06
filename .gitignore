@@ -33,3 +33,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+# Environment variables (DO NOT COMMIT)
+.env
+.env.local
+.env.*.local
+.env.hosted
+
+# Supabase secrets
+.env.keys
