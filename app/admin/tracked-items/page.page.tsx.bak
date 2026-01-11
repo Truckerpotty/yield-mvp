@@ -3,7 +3,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import CreateEmployeeSection from "../../components/CreateEmployeeSection";
 
 type Role = "employee" | "local_admin" | "regional_admin" | "master_admin";
 
@@ -631,7 +630,6 @@ export default function AdminTrackedItemsPage() {
       <div style={{ marginTop: 12, fontSize: 12, opacity: 0.7 }}>
         Local admin can manage tracked items only in their assigned location. Regional admin is limited to their region. Master admin can manage all locations.
       </div>
-      <CreateEmployeeSection />
     </div>
   );
 }

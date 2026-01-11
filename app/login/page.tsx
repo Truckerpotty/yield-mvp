@@ -1,224 +1,112 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-
-type Role = "employee" | "local_admin" | "regional_admin" | "master_admin";
-
-type Profile = {
-  id: string;
-  role: string;
-};
-
-function isAdminRole(role: string) {
-  return role === "local_admin" || role === "regional_admin" || role === "master_admin";
-}
 
 export default function LoginPage() {
   const router = useRouter();
-
-  const [loading, setLoading] = useState(true);
-  const [sessionEmail, setSessionEmail] = useState<string>("");
+  const searchParams = useSearchParams();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const [status, setStatus] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [errorText, setErrorText] = useState("");
 
   useEffect(() => {
-    let mounted = true;
+    let cancelled = false;
 
-    const boot = async () => {
-      setStatus("");
-      setLoading(true);
+    async function init() {
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (cancelled) return;
 
-      const { data, error } = await supabase.auth.getSession();
-      if (!mounted) return;
-
-      if (error) {
-        setSessionEmail("");
-        setLoading(false);
-        return;
-      }
-
-      const sess = data.session;
-      if (!sess?.user) {
-        setSessionEmail("");
-        setLoading(false);
-        return;
-      }
-
-      setSessionEmail(sess.user.email || "");
-
-      const { data: prof, error: profErr } = await supabase
-        .from("profiles")
-        .select("id,role")
-        .eq("id", sess.user.id)
-        .maybeSingle();
-
-      if (profErr) {
-        setStatus(`Could not load profile: ${profErr.message}`);
-        setLoading(false);
-        return;
-      }
-
-      if (!prof) {
-        setStatus("No profile found for this user.");
-        setLoading(false);
-        return;
-      }
-
-      const role = String((prof as Profile).role || "") as Role;
-
-      if (isAdminRole(role)) {
-        router.replace("/admin/users");
-        return;
-      }
-
-      router.replace("/employee");
-    };
-
-    boot();
-
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!mounted) return;
-
-      if (!session?.user) {
-        setSessionEmail("");
-        setLoading(false);
-        return;
-      }
-
-      setSessionEmail(session.user.email || "");
-      void (async () => {
-        const { data: prof } = await supabase
-          .from("profiles")
-          .select("id,role")
-          .eq("id", session.user.id)
-          .maybeSingle();
-
-        const role = String((prof as Profile | null)?.role || "") as Role;
-
-        if (isAdminRole(role)) {
-          router.replace("/admin/users");
+        if (data?.session) {
+          const next = searchParams?.get("next") || "/employee";
+          router.replace(next);
           return;
         }
+      } catch (e: any) {
+        if (!cancelled) setErrorText(e?.message || "Unable to load auth session.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
 
-        router.replace("/employee");
-      })();
-    });
+    init();
 
     return () => {
-      mounted = false;
-      sub?.subscription?.unsubscribe();
+      cancelled = true;
     };
-  }, [router]);
+  }, [router, searchParams]);
 
-  const signIn = async () => {
-    setStatus("");
+  async function signIn(e: React.FormEvent) {
+    e.preventDefault();
+    setErrorText("");
+    setSubmitting(true);
 
-    const e = email.trim().toLowerCase();
-    const p = password;
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password,
+      });
 
-    if (!e) {
-      setStatus("Email is required.");
-      return;
+      if (error) {
+        setErrorText(error.message);
+        return;
+      }
+
+      const next = searchParams?.get("next") || "/employee";
+      router.replace(next);
+    } catch (err: any) {
+      setErrorText(err?.message || "Login failed.");
+    } finally {
+      setSubmitting(false);
     }
-
-    if (!p) {
-      setStatus("Password is required.");
-      return;
-    }
-
-    setLoading(true);
-
-    const { error } = await supabase.auth.signInWithPassword({
-      email: e,
-      password: p,
-    });
-
-    if (error) {
-      setStatus(error.message);
-      setLoading(false);
-      return;
-    }
-
-    setStatus("Signed in.");
-  };
-
-  const signOut = async () => {
-    setStatus("");
-    setLoading(true);
-    await supabase.auth.signOut();
-    setEmail("");
-    setPassword("");
-    setSessionEmail("");
-    setLoading(false);
-  };
+  }
 
   if (loading) {
     return (
-      <div style={{ padding: 24, maxWidth: 520 }}>
-        <div style={{ fontSize: 18, fontWeight: 700 }}>Login</div>
-        <div style={{ marginTop: 10, fontSize: 12, opacity: 0.85 }}>Loading</div>
-      </div>
-    );
-  }
-
-  if (sessionEmail) {
-    return (
-      <div style={{ padding: 24, maxWidth: 520 }}>
-        <div style={{ fontSize: 18, fontWeight: 700 }}>Login</div>
-        <div style={{ marginTop: 10, fontSize: 12, opacity: 0.85 }}>
-          Signed in as {sessionEmail}
-        </div>
-
-        <div style={{ marginTop: 14 }}>
-          <button onClick={signOut} style={{ padding: "10px 14px" }}>
-            Sign out
-          </button>
-        </div>
-
-        {status ? <div style={{ marginTop: 12, fontSize: 12 }}>{status}</div> : null}
-      </div>
+      <main style={{ padding: 24 }}>
+        <h1 style={{ marginBottom: 8 }}>Login</h1>
+        <div>Loading</div>
+      </main>
     );
   }
 
   return (
-    <div style={{ padding: 24, maxWidth: 520 }}>
-      <div style={{ fontSize: 18, fontWeight: 700 }}>Login</div>
+    <main style={{ padding: 24, maxWidth: 420 }}>
+      <h1 style={{ marginBottom: 12 }}>Login</h1>
 
-      <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
-        <div>
-          <div style={{ fontSize: 12, opacity: 0.85 }}>Email</div>
-          <input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            style={{ width: "100%", padding: 10, marginTop: 6 }}
-            autoComplete="email"
-          />
-        </div>
+      {errorText ? <div style={{ marginBottom: 12, color: "salmon" }}>{errorText}</div> : null}
 
-        <div>
-          <div style={{ fontSize: 12, opacity: 0.85 }}>Password</div>
-          <input
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            style={{ width: "100%", padding: 10, marginTop: 6 }}
-            type="password"
-            autoComplete="current-password"
-          />
-        </div>
+      <form onSubmit={signIn}>
+        <label style={{ display: "block", marginBottom: 6 }}>Email</label>
+        <input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          type="email"
+          autoComplete="email"
+          style={{ width: "100%", padding: 10, marginBottom: 12 }}
+          required
+        />
 
-        <div>
-          <button onClick={signIn} style={{ padding: "10px 14px" }}>
-            Sign in
-          </button>
-        </div>
+        <label style={{ display: "block", marginBottom: 6 }}>Password</label>
+        <input
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          type="password"
+          autoComplete="current-password"
+          style={{ width: "100%", padding: 10, marginBottom: 12 }}
+          required
+        />
 
-        {status ? <div style={{ fontSize: 12, opacity: 0.9 }}>{status}</div> : null}
-      </div>
-    </div>
+        <button type="submit" disabled={submitting} style={{ padding: "10px 14px", cursor: "pointer" }}>
+          {submitting ? "Signing in" : "Sign in"}
+        </button>
+      </form>
+    </main>
   );
 }

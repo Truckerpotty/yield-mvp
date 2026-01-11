@@ -8,24 +8,25 @@ type TrainingSessionRow = {
   id: string;
   starts_at: string;
   ends_at: string;
+  location_id: string;
+  status: string;
 };
 
-export default function EmployeeEntryPage() {
+export default function EmployeeTrainingIndexPage() {
   const router = useRouter();
-  const [status, setStatus] = useState("Loading...");
+  const [status, setStatus] = useState<string>("Checking for an active training session...");
 
   useEffect(() => {
     let cancelled = false;
 
-    async function routeEmployee() {
-      setStatus("Checking for active training session...");
+    async function run() {
+      setStatus("Checking for an active training session...");
 
       const { data: userData, error: userErr } = await supabase.auth.getUser();
       const user = userData?.user;
 
       if (userErr || !user) {
-        setStatus("Not signed in. Redirecting to login.");
-        if (!cancelled) router.replace("/login");
+        setStatus("Not signed in. Please go to /login.");
         return;
       }
 
@@ -33,7 +34,7 @@ export default function EmployeeEntryPage() {
 
       const { data: sessions, error: sessionErr } = await supabase
         .from("training_sessions")
-        .select("id,starts_at,ends_at")
+        .select("id,starts_at,ends_at,location_id,status")
         .eq("employee_id", user.id)
         .lte("starts_at", nowIso)
         .gte("ends_at", nowIso)
@@ -41,16 +42,15 @@ export default function EmployeeEntryPage() {
         .limit(1);
 
       if (sessionErr) {
-        setStatus("Failed to check training status.");
-        if (!cancelled) router.replace("/employee/daily");
+        setStatus("Failed to check training session: " + sessionErr.message);
         return;
       }
 
-      const session = sessions?.[0] as TrainingSessionRow | undefined;
+      const session = (sessions?.[0] ?? null) as TrainingSessionRow | null;
 
       if (!session) {
-        setStatus("No training session. Entering daily mode.");
-        if (!cancelled) router.replace("/employee/daily");
+        setStatus("No active training session right now. Returning to daily mode.");
+        if (!cancelled) router.replace("/employee");
         return;
       }
 
@@ -62,22 +62,23 @@ export default function EmployeeEntryPage() {
         .limit(1);
 
       if (completionErr) {
-        setStatus("Failed to check completion status.");
-        if (!cancelled) router.replace("/employee/daily");
+        setStatus("Failed to check completion status: " + completionErr.message);
         return;
       }
 
-      if ((completionRows?.length ?? 0) > 0) {
-        setStatus("Training already completed. Entering daily mode.");
-        if (!cancelled) router.replace("/employee/daily");
+      const alreadyCompleted = (completionRows?.length ?? 0) > 0;
+
+      if (alreadyCompleted) {
+        setStatus("Training session already completed. Returning to daily mode.");
+        if (!cancelled) router.replace("/employee");
         return;
       }
 
       setStatus("Active training session found. Entering training mode.");
-      if (!cancelled) router.replace("/employee/training");
+      if (!cancelled) router.replace("/employee/training/" + session.id);
     }
 
-    routeEmployee();
+    run();
 
     return () => {
       cancelled = true;
@@ -85,9 +86,9 @@ export default function EmployeeEntryPage() {
   }, [router]);
 
   return (
-    <div style={{ padding: 24 }}>
-      <div style={{ fontSize: 18, fontWeight: 700 }}>Employee Portal</div>
-      <div style={{ marginTop: 8, fontSize: 14, opacity: 0.85 }}>{status}</div>
+    <div style={{ padding: 24, maxWidth: 720 }}>
+      <div style={{ fontSize: 20, fontWeight: 700 }}>Training Mode</div>
+      <div style={{ marginTop: 10, fontSize: 14, opacity: 0.85 }}>{status}</div>
     </div>
   );
 }

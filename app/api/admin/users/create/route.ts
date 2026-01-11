@@ -3,161 +3,187 @@ import { createClient } from "@supabase/supabase-js";
 
 type Role = "employee" | "local_admin" | "regional_admin" | "master_admin";
 
-function getBearer(req: Request) {
-  const h = req.headers.get("authorization") || "";
-  const m = h.match(/^Bearer\s+(.+)$/i);
-  return m ? m[1] : "";
+type Body = {
+  email: string;
+  password: string;
+  role?: Role;
+  location_id: string;
+  sublocation_id?: string | null;
+};
+
+function jsonError(message: string, status: number) {
+  return NextResponse.json({ ok: false, error: message }, { status });
 }
 
-function mustEnv(name: string) {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env var ${name}`);
-  return v;
-}
-
-function isValidRole(r: string): r is Role {
-  return r === "employee" || r === "local_admin" || r === "regional_admin" || r === "master_admin";
+async function writeAudit(
+  serviceClient: any,
+  payload: {
+    actor_user_id: string | null;
+    actor_role: string | null;
+    action: string;
+    target_user_id: string | null;
+    location_id: string | null;
+    sublocation_id: string | null;
+    ok: boolean;
+    error_text: string | null;
+    metadata: any;
+  }
+) {
+  await serviceClient.from("audit_log").insert({
+    actor_user_id: payload.actor_user_id,
+    actor_role: payload.actor_role,
+    action: payload.action,
+    target_user_id: payload.target_user_id,
+    location_id: payload.location_id,
+    sublocation_id: payload.sublocation_id,
+    ok: payload.ok,
+    error_text: payload.error_text,
+    metadata: payload.metadata ?? {},
+  });
 }
 
 export async function POST(req: Request) {
   try {
-    const url = mustEnv("NEXT_PUBLIC_SUPABASE_URL");
-    const service = mustEnv("SUPABASE_SERVICE_ROLE_KEY");
+    const authHeader = req.headers.get("authorization") || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
 
-    const token = getBearer(req);
-    if (!token) return NextResponse.json({ error: "Missing bearer token" }, { status: 401 });
+    if (!token) return jsonError("Missing authorization token", 401);
 
-    const admin = createClient(url, service, { auth: { persistSession: false } });
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    const authed = await admin.auth.getUser(token);
-    const requester = authed.data.user;
-    if (!requester) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-
-    const body = await req.json().catch(() => ({}));
-    const email = String(body.email || "").trim().toLowerCase();
-    const password = String(body.password || "").trim();
-    const role = String(body.role || "employee").trim();
-    const location_id = body.location_id ? String(body.location_id) : null;
-    const region_id = body.region_id ? String(body.region_id) : null;
-
-    if (!email) return NextResponse.json({ error: "Email required" }, { status: 400 });
-    if (!password || password.length < 8) {
-      return NextResponse.json({ error: "Password required, 8 chars minimum" }, { status: 400 });
-    }
-    if (!isValidRole(role)) return NextResponse.json({ error: "Invalid role" }, { status: 400 });
-
-    if (role === "master_admin") {
-      return NextResponse.json(
-        { error: "Creating master admin is not allowed in app. Assign master admin out of band." },
-        { status: 403 }
-      );
+    if (!url || !anon || !service) {
+      return jsonError("Server env missing Supabase keys", 500);
     }
 
-    const { data: me, error: meErr } = await admin
-      .from("profiles")
-      .select("id,role,location_id,region_id")
-      .eq("id", requester.id)
-      .maybeSingle();
-
-    if (meErr) return NextResponse.json({ error: meErr.message }, { status: 400 });
-    if (!me) return NextResponse.json({ error: "No profile for requester" }, { status: 403 });
-
-    const myRole = String(me.role || "") as Role;
-
-    const isAdmin =
-      myRole === "local_admin" || myRole === "regional_admin" || myRole === "master_admin";
-    if (!isAdmin) return NextResponse.json({ error: "Access denied" }, { status: 403 });
-
-    if (myRole === "local_admin") {
-      if (role !== "employee") {
-        return NextResponse.json({ error: "Local admin can only create employees" }, { status: 403 });
-      }
-      if (!me.location_id) {
-        return NextResponse.json({ error: "Requester missing location_id" }, { status: 400 });
-      }
-      if (!location_id || location_id !== me.location_id) {
-        return NextResponse.json({ error: "Local admin must assign their own location" }, { status: 403 });
-      }
-    }
-
-    if (myRole === "regional_admin") {
-      if (role === "regional_admin") {
-        return NextResponse.json({ error: "Regional admin cannot create regional admins" }, { status: 403 });
-      }
-      if (!me.region_id) {
-        return NextResponse.json({ error: "Requester missing region_id" }, { status: 400 });
-      }
-      if (!location_id) {
-        return NextResponse.json({ error: "Location required for this role" }, { status: 400 });
-      }
-
-      const { data: loc, error: locErr } = await admin
-        .from("locations")
-        .select("id,region_id")
-        .eq("id", location_id)
-        .maybeSingle();
-
-      if (locErr) return NextResponse.json({ error: locErr.message }, { status: 400 });
-      if (!loc) return NextResponse.json({ error: "Location not found" }, { status: 400 });
-
-      if (String(loc.region_id || "") !== String(me.region_id)) {
-        return NextResponse.json({ error: "Location not in your region" }, { status: 403 });
-      }
-    }
-
-    if (myRole === "master_admin") {
-      if (role === "employee" || role === "local_admin") {
-        if (!location_id) {
-          return NextResponse.json(
-            { error: "Location required for employee or local admin" },
-            { status: 400 }
-          );
-        }
-      }
-      if (role === "regional_admin") {
-        if (!region_id) {
-          return NextResponse.json({ error: "Region required for regional admin" }, { status: 400 });
-        }
-      }
-    }
-
-    const created = await admin.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
+    const callerClient = createClient(url, anon, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+      auth: { persistSession: false },
     });
 
-    if (created.error) return NextResponse.json({ error: created.error.message }, { status: 400 });
+    const {
+      data: { user: callerUser },
+      error: callerErr,
+    } = await callerClient.auth.getUser();
 
-    const newUser = created.data.user;
-    if (!newUser?.id) return NextResponse.json({ error: "Create failed" }, { status: 400 });
+    if (callerErr || !callerUser) return jsonError("Invalid session", 401);
 
-    let finalRegionId: string | null = region_id;
+    const { data: callerProfile, error: callerProfileErr } = await callerClient
+      .from("profiles")
+      .select("role, location_id")
+      .eq("id", callerUser.id)
+      .single();
 
-    if (!finalRegionId && location_id) {
-      const { data: loc } = await admin
-        .from("locations")
-        .select("region_id")
-        .eq("id", location_id)
-        .maybeSingle();
-
-      finalRegionId = loc?.region_id ? String(loc.region_id) : null;
+    if (callerProfileErr || !callerProfile) {
+      return jsonError("Caller profile not found", 403);
     }
 
-    await admin
-      .from("profiles")
-      .upsert(
-        {
-          id: newUser.id,
-          role,
-          location_id: location_id || null,
-          region_id: finalRegionId || null,
-        },
-        { onConflict: "id" }
-      );
+    const callerRole = (callerProfile.role || "employee") as Role;
 
-    return NextResponse.json({ ok: true, id: newUser.id });
+    if (
+      callerRole !== "local_admin" &&
+      callerRole !== "regional_admin" &&
+      callerRole !== "master_admin"
+    ) {
+      return jsonError("Not authorized", 403);
+    }
+
+    const body = (await req.json()) as Body;
+
+    const email = (body.email || "").trim().toLowerCase();
+    const password = (body.password || "").trim();
+    const role: Role = (body.role || "employee") as Role;
+    const locationId = (body.location_id || "").trim();
+    const sublocationIdRaw = body.sublocation_id ? String(body.sublocation_id).trim() : "";
+    const sublocationId = sublocationIdRaw ? sublocationIdRaw : null;
+
+    if (!email) return jsonError("Email required", 400);
+    if (!password || password.length < 8) return jsonError("Password min 8", 400);
+    if (!locationId) return jsonError("Location required", 400);
+
+    if (role !== "employee") {
+      return jsonError("Only employee creation allowed here", 400);
+    }
+
+    if (callerRole === "local_admin") {
+      if (!callerProfile.location_id) {
+        return jsonError("Local admin missing location assignment", 403);
+      }
+      if (callerProfile.location_id !== locationId) {
+        return jsonError("Local admin can only assign within their location", 403);
+      }
+    }
+
+    const serviceClient = createClient(url, service, {
+      auth: { persistSession: false },
+    });
+
+    const auditBase = {
+      actor_user_id: callerUser.id,
+      actor_role: callerRole,
+      action: "create_employee",
+      target_user_id: null as string | null,
+      location_id: locationId,
+      sublocation_id: sublocationId,
+      ok: false,
+      error_text: null as string | null,
+      metadata: { email },
+    };
+
+    const { data: created, error: createErr } =
+      await serviceClient.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+      });
+
+    if (createErr || !created.user) {
+      await writeAudit(serviceClient, {
+        ...auditBase,
+        ok: false,
+        error_text: createErr?.message || "User create failed",
+      });
+      return jsonError(createErr?.message || "User create failed", 400);
+    }
+
+    const newUserId = created.user.id;
+    auditBase.target_user_id = newUserId;
+
+    const profilePayload: Record<string, any> = {
+      id: newUserId,
+      role: "employee",
+      location_id: locationId,
+      sublocation_id: sublocationId,
+      created_by: callerUser.id,
+      created_by_role: callerRole,
+    };
+
+    const { error: upsertErr } = await serviceClient
+      .from("profiles")
+      .upsert(profilePayload, { onConflict: "id" });
+
+    if (upsertErr) {
+      await writeAudit(serviceClient, {
+        ...auditBase,
+        ok: false,
+        error_text: upsertErr.message,
+      });
+      return jsonError(upsertErr.message, 400);
+    }
+
+    await writeAudit(serviceClient, {
+      ...auditBase,
+      ok: true,
+      error_text: null,
+    });
+
+    return NextResponse.json({
+      ok: true,
+      user_id: newUserId,
+      email,
+    });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
+    return jsonError(e?.message || "Unexpected error", 500);
   }
 }
