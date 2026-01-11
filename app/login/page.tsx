@@ -1,12 +1,11 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 export default function LoginPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -24,14 +23,17 @@ export default function LoginPage() {
         if (cancelled) return;
 
         if (data?.session) {
-          const next = searchParams?.get("next") || "/employee";
-          router.replace(next);
+          router.replace("/employee");
           return;
         }
       } catch (e: any) {
-        if (!cancelled) setErrorText(e?.message || "Unable to load auth session.");
+        if (!cancelled) {
+          setErrorText(e?.message || "Unable to load auth session.");
+        }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
 
@@ -40,7 +42,7 @@ export default function LoginPage() {
     return () => {
       cancelled = true;
     };
-  }, [router, searchParams]);
+  }, [router]);
 
   async function signIn(e: React.FormEvent) {
     e.preventDefault();
@@ -54,12 +56,11 @@ export default function LoginPage() {
       });
 
       if (error) {
-        setErrorText(error.message);
+        setErrorText(error.message || "Login failed.");
         return;
       }
 
-      const next = searchParams?.get("next") || "/employee";
-      router.replace(next);
+      router.replace("/employee");
     } catch (err: any) {
       setErrorText(err?.message || "Login failed.");
     } finally {
@@ -80,7 +81,9 @@ export default function LoginPage() {
     <main style={{ padding: 24, maxWidth: 420 }}>
       <h1 style={{ marginBottom: 12 }}>Login</h1>
 
-      {errorText ? <div style={{ marginBottom: 12, color: "salmon" }}>{errorText}</div> : null}
+      {errorText ? (
+        <div style={{ marginBottom: 12, color: "salmon" }}>{errorText}</div>
+      ) : null}
 
       <form onSubmit={signIn}>
         <label style={{ display: "block", marginBottom: 6 }}>Email</label>
@@ -103,7 +106,11 @@ export default function LoginPage() {
           required
         />
 
-        <button type="submit" disabled={submitting} style={{ padding: "10px 14px", cursor: "pointer" }}>
+        <button
+          type="submit"
+          disabled={submitting}
+          style={{ padding: "10px 14px", cursor: "pointer" }}
+        >
           {submitting ? "Signing in" : "Sign in"}
         </button>
       </form>
